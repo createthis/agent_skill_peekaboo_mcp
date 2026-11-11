@@ -35,6 +35,49 @@ Same pattern. After dispatch, re-observe:
 
 A small delta (command + short error + prompt, no scrollbar growth) means the command failed — probe for the error string to see which.
 
+## Reliable command execution: clipboard + menu Paste
+
+`type` into the shell works for short commands but is the least reliable path — it is
+unconfirmed by design (truncated read-only value) and character-by-character timing has
+flaked. The robust recipe for real work, especially longer or special-character-heavy
+commands:
+
+```
+clipboard set (text = command + trailing "\n")
+window focus (app: "Terminal", window_id)     # exact window, no foreground param
+menu click (app: "Terminal", path: "Edit > Paste")
+inspect_ui (window_id)                         # verify it landed
+```
+
+Notes:
+
+- **The trailing `\n` is what runs the command.** Without it the command sits on the prompt.
+- **The menu is the reliable trigger.** `menu` click "Edit > Paste" works even when window
+  focus state looks indeterminate. A `press` of Return after a paste is the flaky part —
+  avoid it; let the trailing newline do the work.
+- **Keep pasted commands short (< ~200 chars, no long `&&` chains).** Long one-liners can
+  leave a stuck `>` continuation prompt in the shell.
+- **Brackets-paste caveat:** some shell setups bracket-paste, so the newline inside pasted
+  text may not auto-execute. Verify with `inspect_ui` that a new prompt line appeared; if
+  not, send the newline separately and verify again.
+- **Reading the output:** `inspect_ui` shows only the top of the buffer (quirk 1). For
+  results that matter, make the command emit them to a file and read short slices
+  (`grep -c`, `tail -N`, `head -N`), or copy out via `... | pbcopy` then `clipboard get`
+  in the MCP session.
+
+### Recovering a stuck continuation prompt (`>`)
+
+A paste that broke mid-command leaves the shell at a `>` continuation. Recover:
+
+1. `press` with `{"key":"c","modifiers":["ctrl"]}` (Ctrl-C aborts the continuation).
+   **`"C-c"` is not a valid key name** — the modifier must be structured, or use
+   `{"keys":["ctrl+c"]}`.
+2. Re-list windows, re-focus the exact window, verify a fresh `$` prompt with
+   `inspect_ui`, then continue.
+
+Do not retry the original paste before the prompt is clean, or you will append to the
+half-command.
+
 ## Multiple Terminal windows/tabs
 
 `window list` shows every Terminal window, and the tab bar is in the AX tree: each tab is a checkbox-like element whose `help` is the tab's title; `value: "true"` marks the selected tab. The topmost window (or the one you focused) is what input targets. When several full-screen windows are stacked at identical bounds, **the one with `observation_capability: "combined_eligible"` is the current key window** — the others report `pixels_only` with `no_matching_accessibility_window`. Target the key window's ID explicitly; app-level targeting will be ambiguous.
